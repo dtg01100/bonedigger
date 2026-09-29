@@ -5,8 +5,40 @@ Load when working on the client-side diagnostic reporting tool in `projectbluefi
 ## Commands
 
 ```bash
-ujust report         # collect diagnostics, review locally, upload to gist, open issue
+ujust report                                  # collect diagnostics, review locally, upload to gist, open issue
+ujust report --confirm <issue-number-or-url>  # post a system fingerprint to an existing issue
+ujust report --resume <draft-directory>       # resume a saved draft from a previous run
 ```
+
+### `--confirm <issue-number-or-url>`
+
+Attach a system fingerprint comment to an existing GitHub issue. The `<target>` is
+either an issue number (posted to the image's own tracker, resolved from
+`BUG_REPORT_URL` in `/etc/os-release`) or a full
+`https://github.com/<owner>/<repo>/issues/<n>` URL. The fingerprint body contains:
+
+- Image ref, tag, version, booted digest
+- Kernel and architecture
+- Failed systemd units (top 10, scrubbed)
+
+`bonedigger-report` parses the target, prints `Will post to: <url>`, asks
+`gum confirm "Post this comment?"` (TTY only), then calls
+`gh issue comment <n> --repo <repo> --body <fingerprint>`. On success, prints the
+comment URL.
+
+Implemented in `projectbluefin/common/system_files/bluefin/usr/libexec/bonedigger-report`
+(`parse_confirm_target`, `confirm_report`).
+
+### `--resume <draft-directory>`
+
+Reload a saved draft from `$XDG_STATE_HOME/ujust-report/drafts/<draft-XXXXXX>/`
+produced by a prior `ujust report` run that was not submitted, and continue the
+upload flow against the existing artifacts. `<draft-directory>` is the exact path
+printed at draft-save time (also shown by the helper as
+`Resume with: ujust report --resume <draft>`).
+
+`--confirm` and `--resume` are mutually exclusive — the script rejects both being
+set at once.
 
 ## What `ujust report` collects
 

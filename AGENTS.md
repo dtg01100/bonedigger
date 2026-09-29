@@ -37,7 +37,8 @@ Never report success before running these checks and reading the output.
 | Skill | Load when… |
 |-------|-----------|
 | [`bonedigger-overview`](docs/skills/bonedigger-overview.md) | Starting any work in this repo — architecture, user commands, repo layout |
-| [`bonedigger-ujust`](docs/skills/bonedigger-ujust.md) | Working on the `ujust report` diagnostics framework, PII scrubbing, OTel specs, or gist intake |
+| [`bonedigger-ujust`](docs/skills/bonedigger-ujust.md) | Working on the `ujust report` diagnostics framework, PII scrubbing, OTel specs, gist intake, or console QR codes for reports |
+| [`bonedigger-qrcode`](docs/skills/bonedigger-qrcode.md) | Adding console QR output to `ujust report` so a phone can scan and open the report to voice-dictate into it |
 | [`bonedigger-templates`](docs/skills/bonedigger-templates.md) | Adding, editing, or syncing GitHub issue templates; working on `sync-templates.yml` |
 
 ## Quick orientation

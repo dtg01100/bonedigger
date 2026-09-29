@@ -142,9 +142,10 @@ The definitive OTel config lives in `projectbluefin/common/system_files/bluefin/
 ## Upload flow
 
 1. Show rendered report via `glow` + `gum pager` for local review
-2. Confirm upload with `gum confirm`
+2. **Print the issue-form QR code** so the user can open the form on their phone
+3. Confirm upload with `gum confirm`
 3. If `gh auth status --active` fails → copy to clipboard (wl-copy or xclip), show issue URL; `journal.txt` path shown separately
-4. If auth OK → `gh gist create --public` with `summary.md` + `journal.txt` (always) + `metrics.otlp.jsonl` + `logs.otlp.jsonl` (if OTel captured)
+4. If auth OK → `gh gist create --public` with `summary.md` + `journal.txt` (always) + `metrics.otlp.jsonl` + `logs.otlp.jsonl` (if OTel captured). **After a successful gist upload, print the gist URL as a QR code.**
 5. `gum choose` "File a bug report / Request a feature / Skip" — bugs route to the image's own tracker, feature requests always go to common
 
 ## Environment variable overrides
@@ -155,10 +156,30 @@ The definitive OTel config lives in `projectbluefin/common/system_files/bluefin/
 | `BONEDIGGER_ISSUE_URL` | `https://github.com/projectbluefin/common/issues/new?template=bug-report.yml` | Issue URL base |
 | `BONEDIGGER_BRAND` | `🫐 Bluefin Bug Report` | Brand name shown in gum header |
 
+## Console QR codes (`ujust report`)
+
+After the summary renders, print a QR code so a user on their phone can scan it
+and open the report to voice-dictate into it. Full spec:
+[`bonedigger-qrcode.md`](bonedigger-qrcode.md).
+
+Two QRs, both URL-only (no PII):
+
+1. **Pre-upload** — right after the summary renders, before the upload confirm:
+   QR of the canonical issue-report URL (`BONEDIGGER_ISSUE_URL` / `BUG_REPORT_URL`)
+   so the form opens on the phone.
+2. **Post-upload** — after `gh gist create --public` succeeds: QR of the public
+   gist URL so the report opens on any device.
+
+Render with `qrencode -t ANSIUTF8 -s <size> -m 4 "<url>"` (primary), falling back
+to a bundled pure-bash generator when `qrencode` is absent. Wrap in a single
+`print_qrcode <url>` helper so the renderer is one choke point; the helper must
+round-trip (decoded output equals the input URL).
+
 ## Dependencies
 
 - `gum` — TUI prompts and styling
 - `gh` — GitHub CLI for gist upload and auth check
+- `qrencode` — prints the console QR code (see above)
 - `bootc` — reads booted image status
 - `jq` — parses JSON from bootc and image-info
 - `gnome-shell`, `gnome-extensions`, `flatpak` — collects system info

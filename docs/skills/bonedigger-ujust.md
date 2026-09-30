@@ -13,9 +13,12 @@ ujust report --resume <draft-directory>       # resume a saved draft from a prev
 ### `--confirm <issue-number-or-url>`
 
 Attach a system fingerprint comment to an existing GitHub issue. The `<target>` is
-either an issue number (posted to the image's own tracker, resolved from
-`BUG_REPORT_URL` in `/etc/os-release`) or a full
-`https://github.com/<owner>/<repo>/issues/<n>` URL. The fingerprint body contains:
+either a bare issue number or a full `https://github.com/<owner>/<repo>/issues/<n>`
+URL. For a bare number, `main()` calls `route_issue_repo`, which resolves the repo
+from the booted image name and tag by running
+`/usr/libexec/ublue-image-repo --default projectbluefin/common "$IMAGE_NAME" "$IMAGE_TAG"`
+— `BUG_REPORT_URL` is not read on this path. A full URL is used as-is. The
+fingerprint body contains:
 
 - Image ref, tag, version, booted digest
 - Kernel and architecture
@@ -27,7 +30,8 @@ either an issue number (posted to the image's own tracker, resolved from
 comment URL.
 
 Implemented in `projectbluefin/common/system_files/bluefin/usr/libexec/bonedigger-report`
-(`parse_confirm_target`, `confirm_report`).
+(`route_issue_repo`, `parse_confirm_target`, `confirm_report`). The routing grammar
+itself lives in `system_files/shared/usr/libexec/ublue-image-repo`.
 
 ### `--resume <draft-directory>`
 

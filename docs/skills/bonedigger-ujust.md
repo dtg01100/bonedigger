@@ -1,6 +1,6 @@
 # bonedigger — ujust report tool
 
-Load when working on the client-side diagnostic reporting tool in `projectbluefin/common`: `system_files/bluefin/usr/share/ublue-os/just/60-bonedigger.just`, `system_files/bluefin/usr/share/ublue-os/otel/ujust-report-config.yaml`, or the OTel deep metrics capture.
+Load when working on the client-side diagnostic reporting tool in `projectbluefin/common`: `system_files/bluefin/usr/share/ublue-os/just/60-bonedigger.just` (the recipe) and `system_files/bluefin/usr/libexec/bonedigger-report` (the script the recipe invokes). The `ujust-report-config.yaml` OTel collector config in `system_files/bluefin/usr/share/ublue-os/otel/` is **image content** owned by `projectbluefin/common` — see [Where the code lives](#where-the-code-lives--do-not-get-this-wrong); the script no longer runs an OTel collector.
 
 ## Commands
 
@@ -28,7 +28,6 @@ ujust report         # collect diagnostics, review locally, upload to gist, open
 | Groups (membership only) | `groups` (username redacted) |
 | GPU info | `nvidia-smi -q` (NVIDIA), DRM sysfs (AMD), `lspci` (all) |
 | Crash / panic detection | Previous boot end state, panic keywords, kernel errors, hardware fingerprint, crash artifact status |
-| Optional: deep hardware metrics | OpenTelemetry (35s sample) |
 
 ## PII scrubbing
 
@@ -112,41 +111,25 @@ Implemented in `projectbluefin/common/system_files/bluefin/usr/share/ublue-os/ju
 - `systemctl is-enabled kdump.service &>/dev/null` — safe in `if` condition
 - `${PSTORE_COUNT:-0}` — guards against empty find output
 
-## Optional deep hardware metrics (OTel)
+## Deep hardware metrics capture (OTel) — retired
 
-Gated on `/usr/share/ublue-os/otel/ujust-report-config.yaml` existing in the image. If present, the user is offered a 35-second hardware telemetry capture. Outputs two spec-compliant OTLP NDJSON files (one signal type per file, per OTel spec):
+The shipped `bonedigger-report` no longer runs an OpenTelemetry collector. The 35-second `otelcol-contrib` capture, the `metrics.otlp.jsonl` / `logs.otlp.jsonl` outputs, the binary-resolution ladder, the `podman run docker.io/otel/opentelemetry-collector-contrib` fallback, and the `python3`-based `/output/` config-path substitution are **not implemented** and are not part of the v1 contract. The `ujust-report-config.yaml` shipped under `system_files/bluefin/usr/share/ublue-os/otel/` in `projectbluefin/common` is image content owned there; this skill no longer claims it.
 
-- `metrics.otlp.jsonl` — CPU, memory, disk, filesystem, network, paging, processes, Podman containers
-- `logs.otlp.jsonl` — journald service errors/warnings (gnome-shell, gdm, bluetooth, NetworkManager, systemd-coredump) + kernel dmesg (warning+)
-
-The definitive OTel config lives in `projectbluefin/common/system_files/bluefin/usr/share/ublue-os/otel/ujust-report-config.yaml`.
-
-**OTel collector config highlights:**
-- `memory_limiter` first (512 MiB limit) — OTel best practice
-- `batch` last before exporters — OTel best practice
-- `host.id` disabled (machine-id derived)
-- Process scraper: `command_line` and `executable.path` metrics disabled at source
-- Filesystem exclusion regexes use proper anchors (`^/proc(/|$)` not `/proc/*`)
-- `hostname_sources: [os]` — no DNS lookup
-
-**Binary resolution order:**
-1. `$HOME/.local/bin/otelcol-contrib`
-2. `/usr/local/bin/otelcol-contrib`
-3. `$(command -v otelcol-contrib)`
-4. Fallback: `podman run docker.io/otel/opentelemetry-collector-contrib` (privileged, 45s timeout, no `--network=host`)
-
-**Podman fallback mounts:** `/proc`, `/sys`, `/var/log/journal`, `/run/log/journal`, substituted config, output dir, and the Podman socket (dynamic `id -u`).
-
-**Config path substitution** uses `python3` (not `sed`) to safely replace `/output/` with `$REPORT_DIR/` — handles `&` and `\` in paths.
+Replacement diagnostics live in the **smart-log profiles** the user selects during `submit_draft` (`collect_profiles` in `bonedigger-report`): `desktop-graphics.md`, `sleep-crash.md`, `update-boot.md`, `networking.md`, `flatpak-application.md`. Each is a redacted markdown excerpt (passed through `scrub_journal_log` / `scrub_kernel_log`) capped per-file by `limit_file` and posted as a public gist by `publish_smart_logs` when the user opts in.
 
 ## Upload flow
 
-1. Show rendered report via `glow` + `gum pager` for local review
-2. **Print the issue-form QR code** so the user can open the form on their phone
-3. Confirm upload with `gum confirm`
-3. If `gh auth status --active` fails → copy to clipboard (wl-copy or xclip), show issue URL; `journal.txt` path shown separately
-4. If auth OK → `gh gist create --public` with `summary.md` + `journal.txt` (always) + `metrics.otlp.jsonl` + `logs.otlp.jsonl` (if OTel captured). **After a successful gist upload, print the gist URL as a QR code.**
-5. `gum choose` "File a bug report / Request a feature / Skip" — bugs route to the image's own tracker, feature requests always go to common
+The full submit path lives in `submit_draft()` in `projectbluefin/common/system_files/bluefin/usr/libexec/bonedigger-report`. Steps, in order:
+
+1. **Preview** (`preview_draft`). `gum pager` over `$DRAFT_DIR/issue.md` and each selected profile file. On non-TTY stdin/stdout (`bash < issue.md` style), falls back to plain `cat`. No `glow` is invoked — the preview is plain text.
+2. **Print the issue-form QR code** so the user can open the form on their phone. See [Console QR codes](#console-qr-codes-ujust-report) for the renderer and content.
+3. **Queue preference** (bug reports only). `choose_queue_preference` offers `"No queue preference" / "Submit to the clanker queue for machine analysis" / "I only want human interaction"`, persists the answer to `$DRAFT_DIR/queue-label.txt`, and writes an HTML marker to `$DRAFT_DIR/issue.md` so downstream intake can read the preference back.
+4. **Consent**. `gum confirm` with a message that varies with whether smart logs were selected — `"Create this public GitHub issue?"` when no profiles were chosen, `"Publish the selected smart logs publicly and create this issue?"` when at least one was. Decline keeps the draft for `--resume`.
+5. **`ensure_gh_ready`**. Confirms `gh` is on `$PATH` and `gh auth status --active` succeeds; offers to `brew install gh` / `gh auth login --web --skip-ssh-key` if not. Returns non-zero and keeps the draft on failure.
+6. **`publish_smart_logs`** (only when `PROFILE_FILES` is non-empty). `gh gist create --public --desc "ujust report smart logs $(date -I)" "${PROFILE_FILES[@]}"`. The returned gist URL is cached in `$DRAFT_DIR/gist-url.txt` and appended to `$DRAFT_DIR/issue.md` as a `### Selected smart logs` block — so a re-run does not double-post.
+7. **`create_issue`**. `gh issue create --repo <repo> --title <title> --body-file <issue.md>` plus `--label <queue-label>` when one was chosen. On failure the draft is kept.
+8. **`persist_local_copy`**. Copies `issue.md` to `${XDG_STATE_HOME:-$HOME/.local/state}/ujust-report/last/summary.md` and any non-`issue.md` profile files (e.g. `desktop-graphics.md`) alongside. `journal.txt` is only copied if the draft already contains one — `bonedigger-report` does not generate one.
+9. **Cleanup and offer**. On full success: `rm -rf "$DRAFT_DIR"`, print `Local copy kept at: …`, then `offer_browser` (`gum confirm` → `xdg-open` of the issue URL). On any earlier failure the draft survives for `ujust report --resume <draft>`.
 
 ## Environment variable overrides
 
@@ -178,26 +161,41 @@ round-trip (decoded output equals the input URL).
 ## Dependencies
 
 - `gum` — TUI prompts and styling
-- `gh` — GitHub CLI for gist upload and auth check
-- `qrencode` — prints the console QR code (see above)
+- `gh` — GitHub CLI for gist upload, issue creation, and auth check
+- `qrencode` — prints the console QR code (see [Console QR codes](#console-qr-codes-ujust-report))
 - `bootc` — reads booted image status
 - `jq` — parses JSON from bootc and image-info
 - `gnome-shell`, `gnome-extensions`, `flatpak` — collects system info
-- `glow` (optional) — renders markdown in terminal
 - `wl-copy` / `xclip` (optional) — clipboard fallback when not authenticated
-- `otelcol-contrib` or `podman` (optional) — deep hardware metrics
 
 ## Report output structure
 
+`bonedigger-report` keeps two on-disk locations; no `trap - EXIT` cleanup. Drafts survive submission-cancelled runs on purpose so `--resume` can finish them.
+
 ```
-$XDG_RUNTIME_DIR/ujust-report/report-XXXXXX/
-  summary.md           — Markdown report (always)
-  journal.txt          — Current boot system/service logs (always)
-  metrics.otlp.jsonl   — OTel host/container metrics (if OTel captured)
-  logs.otlp.jsonl      — OTel journald + kernel logs (if OTel captured)
+${XDG_STATE_HOME:-$HOME/.local/state}/ujust-report/drafts/draft-XXXXXX/   # created on every start
+  issue.md            — body submitted with `gh issue create` (always)
+  title.txt           — title submitted with the issue (always)
+  repo.txt            — owner/repo the issue is filed against (always)
+  queue-label.txt     — clanker-queue / human-queue / empty, persisted by choose_queue_preference
+  bug-report.txt      — present only on the bug-report path (flag for queue prompt)
+  profile-files.txt   — basenames of selected profile files in this draft
+  gist-url.txt        — public gist URL once `publish_smart_logs` succeeds
+  desktop-graphics.md / sleep-crash.md / update-boot.md / networking.md /
+  flatpak-application.md   — selected smart-log profile outputs (only those chosen)
 ```
 
-Temp directory is cleaned up on EXIT trap. Use `trap - EXIT; exit 0` to preserve files when user cancels.
+The local "last submission" copy mirrors the draft for `keep_draft` / `persist_local_copy` and is overwritten on each successful submit:
+
+```
+${XDG_STATE_HOME:-$HOME/.local/state}/ujust-report/last/
+  summary.md          — copy of issue.md (always)
+  journal.txt         — copy of the draft's journal.txt if it had one (bonedigger-report
+                        does not generate one; copy is a no-op otherwise)
+  <profile>.md        — copy of every selected smart-log profile (desktop-graphics.md etc.)
+```
+
+Resume an unsubmitted draft with `ujust report --resume <draft-directory>`. Successful submission removes the draft directory but leaves `last/` in place.
 
 ## Consumer context (read before proposing design changes)
 
@@ -207,13 +205,14 @@ Temp directory is cleaned up on EXIT trap. Use `trap - EXIT; exit 0` to preserve
 
 ## Where the code lives — do not get this wrong
 
-The recipe and OTel config are **image content**, not CI tooling. They live in `projectbluefin/common`:
+The recipe, the script it invokes, and the OTel collector config that ships under `/usr/share/ublue-os/otel/` are **image content**, not CI tooling. They live in `projectbluefin/common`:
 
 | File | Path in common |
 |------|----------------|
 | `ujust report` recipe | `system_files/bluefin/usr/share/ublue-os/just/60-bonedigger.just` |
+| `ujust report` script (invoked by the recipe) | `system_files/bluefin/usr/libexec/bonedigger-report` |
 | OTel collector config | `system_files/bluefin/usr/share/ublue-os/otel/ujust-report-config.yaml` |
 
-`common` ships both files to every image via `common.bst`. Dakota and bluefin inherit them automatically — do **not** add copies to those repos.
+`common` ships these files to every image via `common.bst`. Dakota and bluefin inherit them automatically — do **not** add copies to those repos. The OTel config is shipped but the current `bonedigger-report` does not run it; see [Deep hardware metrics capture (OTel) — retired](#deep-hardware-metrics-capture-otel--retired).
 
 **Sync workflows are the wrong answer.** If you find yourself creating a workflow to copy these files from bonedigger to common (or anywhere else), stop: the file is in the wrong repo. Edit it directly in common.

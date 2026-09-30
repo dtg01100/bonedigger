@@ -122,24 +122,26 @@ Replacement diagnostics live in the **smart-log profiles** the user selects duri
 The full submit path lives in `submit_draft()` in `projectbluefin/common/system_files/bluefin/usr/libexec/bonedigger-report`. Steps, in order:
 
 1. **Preview** (`preview_draft`). `gum pager` over `$DRAFT_DIR/issue.md` and each selected profile file. On non-TTY stdin/stdout (`bash < issue.md` style), falls back to plain `cat`. No `glow` is invoked — the preview is plain text.
-2. **Print the issue-form QR code** so the user can open the form on their phone. See [Console QR codes](#console-qr-codes-ujust-report) for the renderer and content.
-3. **Queue preference** (bug reports only). `choose_queue_preference` offers `"No queue preference" / "Submit to the clanker queue for machine analysis" / "I only want human interaction"`, persists the answer to `$DRAFT_DIR/queue-label.txt`, and writes an HTML marker to `$DRAFT_DIR/issue.md` so downstream intake can read the preference back.
-4. **Consent**. `gum confirm` with a message that varies with whether smart logs were selected — `"Create this public GitHub issue?"` when no profiles were chosen, `"Publish the selected smart logs publicly and create this issue?"` when at least one was. Decline keeps the draft for `--resume`.
-5. **`ensure_gh_ready`**. Confirms `gh` is on `$PATH` and `gh auth status --active` succeeds; offers to `brew install gh` / `gh auth login --web --skip-ssh-key` if not. Returns non-zero and keeps the draft on failure.
-6. **`publish_smart_logs`** (only when `PROFILE_FILES` is non-empty). `gh gist create --public --desc "ujust report smart logs $(date -I)" "${PROFILE_FILES[@]}"`. The returned gist URL is cached in `$DRAFT_DIR/gist-url.txt` and appended to `$DRAFT_DIR/issue.md` as a `### Selected smart logs` block — so a re-run does not double-post.
-7. **`create_issue`**. `gh issue create --repo <repo> --title <title> --body-file <issue.md>` plus `--label <queue-label>` when one was chosen. On failure the draft is kept.
-8. **`persist_local_copy`**. Copies `issue.md` to `${XDG_STATE_HOME:-$HOME/.local/state}/ujust-report/last/summary.md` and any non-`issue.md` profile files (e.g. `desktop-graphics.md`) alongside. `journal.txt` is only copied if the draft already contains one — `bonedigger-report` does not generate one.
-9. **Cleanup and offer**. On full success: `rm -rf "$DRAFT_DIR"`, print `Local copy kept at: …`, then `offer_browser` (`gum confirm` → `xdg-open` of the issue URL). On any earlier failure the draft survives for `ujust report --resume <draft>`.
+2. **Queue preference** (bug reports only). `choose_queue_preference` offers `"No queue preference" / "Submit to the clanker queue for machine analysis" / "I only want human interaction"`, persists the resulting label (`3-clanker-queue`, `3-human-queue`, or empty) to `$DRAFT_DIR/queue-label.txt`, and writes an HTML marker to `$DRAFT_DIR/issue.md` so downstream intake can read the preference back.
+3. **Consent**. `gum confirm` with a message that varies with whether smart logs were selected — `"Create this public GitHub issue?"` when no profiles were chosen, `"Publish the selected smart logs publicly and create this issue?"` when at least one was. Decline keeps the draft for `--resume`.
+4. **`ensure_gh_ready`**. Confirms `gh` is on `$PATH` and `gh auth status --active` succeeds; offers to `brew install gh` / `gh auth login --web --skip-ssh-key` if not. Returns non-zero and keeps the draft on failure.
+5. **`publish_smart_logs`** (only when `PROFILE_FILES` is non-empty). `gh gist create --public --desc "ujust report smart logs $(date -I)" "${PROFILE_FILES[@]}"`. The returned gist URL is cached in `$DRAFT_DIR/gist-url.txt` and appended to `$DRAFT_DIR/issue.md` as a `### Selected smart logs` block — so a re-run does not double-post.
+6. **`create_issue`**. `gh issue create --repo <repo> --title <title> --body-file <issue.md>` plus `--label <queue-label>` when one was chosen. On failure the draft is kept.
+7. **`persist_local_copy`**. Copies `issue.md` to `${XDG_STATE_HOME:-$HOME/.local/state}/ujust-report/last/summary.md` and any non-`issue.md` profile files (e.g. `desktop-graphics.md`) alongside. `journal.txt` is only copied if the draft already contains one — `bonedigger-report` does not generate one.
+8. **Cleanup and offer**. On full success: `rm -rf "$DRAFT_DIR"`, print `Local copy kept at: …`, then `offer_browser` (`gum confirm` → `xdg-open` of the issue URL). On any earlier failure the draft survives for `ujust report --resume <draft>`.
 
 ## Environment variable overrides
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `IMAGE_INFO_FILE` | `/usr/share/ublue-os/image-info.json` | Image metadata path |
-| `BONEDIGGER_ISSUE_URL` | `https://github.com/projectbluefin/common/issues/new?template=bug-report.yml` | Issue URL base |
 | `BONEDIGGER_BRAND` | `🫐 Bluefin Bug Report` | Brand name shown in gum header |
 
-## Console QR codes (`ujust report`)
+`bonedigger-report` reads only these two variables (`bonedigger-report:5-6`). `BONEDIGGER_ISSUE_URL` is **spec, not implemented** — it belongs to the unimplemented [Console QR codes](#console-qr-codes-ujust-report--not-implemented) section.
+
+## Console QR codes (`ujust report`) — not implemented
+
+**Nothing in this section ships.** `bonedigger-report` never invokes `qrencode` and never prints a QR code; the text below is a design spec for future work, kept here alongside the PII/clipboard backlog rows.
 
 After the summary renders, print a QR code so a user on their phone can scan it
 and open the report to voice-dictate into it. Full spec:
@@ -162,7 +164,7 @@ round-trip (decoded output equals the input URL).
 
 - `gum` — TUI prompts and styling
 - `gh` — GitHub CLI for gist upload, issue creation, and auth check
-- `qrencode` — prints the console QR code (see [Console QR codes](#console-qr-codes-ujust-report))
+- `qrencode` — spec-only, for the unimplemented [Console QR codes](#console-qr-codes-ujust-report--not-implemented); the shipped script never calls it
 - `bootc` — reads booted image status
 - `jq` — parses JSON from bootc and image-info
 - `gnome-shell`, `gnome-extensions`, `flatpak` — collects system info
@@ -170,14 +172,14 @@ round-trip (decoded output equals the input URL).
 
 ## Report output structure
 
-`bonedigger-report` keeps two on-disk locations; no `trap - EXIT` cleanup. Drafts survive submission-cancelled runs on purpose so `--resume` can finish them.
+`bonedigger-report` keeps two on-disk locations; no `trap - EXIT` cleanup. A draft is created only on the bug-report and feature-request paths (`create_draft` is called from `start_bug_report` and `start_feature_request`); `--confirm` and the "Get help" path never create one. Drafts survive submission-cancelled runs on purpose so `--resume` can finish them.
 
 ```
-${XDG_STATE_HOME:-$HOME/.local/state}/ujust-report/drafts/draft-XXXXXX/   # created on every start
+${XDG_STATE_HOME:-$HOME/.local/state}/ujust-report/drafts/draft-XXXXXX/   # created by create_draft, called only from start_bug_report / start_feature_request
   issue.md            — body submitted with `gh issue create` (always)
   title.txt           — title submitted with the issue (always)
   repo.txt            — owner/repo the issue is filed against (always)
-  queue-label.txt     — clanker-queue / human-queue / empty, persisted by choose_queue_preference
+  queue-label.txt     — `3-clanker-queue` / `3-human-queue` / empty, persisted by choose_queue_preference
   bug-report.txt      — present only on the bug-report path (flag for queue prompt)
   profile-files.txt   — basenames of selected profile files in this draft
   gist-url.txt        — public gist URL once `publish_smart_logs` succeeds
@@ -185,7 +187,7 @@ ${XDG_STATE_HOME:-$HOME/.local/state}/ujust-report/drafts/draft-XXXXXX/   # crea
   flatpak-application.md   — selected smart-log profile outputs (only those chosen)
 ```
 
-The local "last submission" copy mirrors the draft for `keep_draft` / `persist_local_copy` and is overwritten on each successful submit:
+The local "last submission" copy is written by `persist_local_copy` only — `keep_draft` just prints the resume hint and never touches `last/`. It is overwritten on each successful submit:
 
 ```
 ${XDG_STATE_HOME:-$HOME/.local/state}/ujust-report/last/

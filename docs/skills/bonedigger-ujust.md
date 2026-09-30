@@ -22,9 +22,9 @@ ujust report         # collect diagnostics, review locally, upload to gist, open
 | Load average | `/proc/loadavg` |
 | Memory usage | `free -h --si` |
 | Failed systemd units | `systemctl list-units --state=failed` |
-| Current boot kernel errors | `journalctl -b 0 -k -p err..emerg` (attached as `journal.txt`) |
-| Current boot system errors | `journalctl -b 0 -p err..emerg` (attached as `journal.txt`) |
-| Key service logs | `journalctl -b 0 -u <svc>` for gnome-shell, gdm, NetworkManager, bluetooth, rpm-ostree, systemd-coredump (attached as `journal.txt`) |
+| Current boot system errors | `journalctl -b 0 -p err..emerg … \| tail -40` (inlined into `issue.md` by `collect_baseline`) |
+| Previous boot kernel crash / sleep signals | `journalctl -b -1 -k` filtered for panic/oops/suspend keywords (inlined into `sleep-crash.md` by `profile_sleep_crash`, only when that profile is selected) |
+| Key service logs | Per-profile `journalctl -b 0 -u <svc> -p warning..alert` — gdm/gnome-shell (`desktop-graphics.md`), bootc-fetch-apply-updates/rpm-ostreed/systemd-boot-update (`update-boot.md`), NetworkManager (`networking.md`), flatpak-system-helper/xdg-desktop-portal (`flatpak-application.md`) |
 | Groups (membership only) | `groups` (username redacted) |
 | GPU info | `nvidia-smi -q` (NVIDIA), DRM sysfs (AMD), `lspci` (all) |
 | Crash / panic detection | Previous boot end state, panic keywords, kernel errors, hardware fingerprint, crash artifact status |
@@ -71,7 +71,7 @@ Applied to every `journalctl -b -1 -k` excerpt. **Order matters** — MAC must r
 
 ## Crash / Panic Detection section
 
-Implemented in `projectbluefin/common/system_files/bluefin/usr/share/ublue-os/just/60-bonedigger.just`. All data sourced from `journalctl -b -1` (previous boot). All kernel excerpts pass through `scrub_kernel_log()` before landing in `summary.md`.
+Implemented in `projectbluefin/common/system_files/bluefin/usr/libexec/bonedigger-report` (`profile_sleep_crash`); the `60-bonedigger.just` recipe is a thin shim that execs it. All data sourced from `journalctl -b -1` (previous boot). All kernel excerpts pass through `scrub_kernel_log()` before landing in the report.
 
 ### Boot end-state classifier (4 buckets — never assume)
 
@@ -168,7 +168,7 @@ round-trip (decoded output equals the input URL).
 - `bootc` — reads booted image status
 - `jq` — parses JSON from bootc and image-info
 - `gnome-shell`, `gnome-extensions`, `flatpak` — collects system info
-- `wl-copy` / `xclip` (optional) — clipboard fallback when not authenticated
+- `wl-copy` / `xclip` — **not used**. The shipped script never copies anything to the clipboard; the unauthenticated path is handled by `ensure_gh_ready` (offers `brew install gh` / `gh auth login`, keeps the draft for `--resume`). Kept here only as a backlog row alongside the [Console QR codes](#console-qr-codes-ujust-report--not-implemented) spec.
 
 ## Report output structure
 

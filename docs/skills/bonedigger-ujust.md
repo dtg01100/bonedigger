@@ -27,7 +27,8 @@ ujust report         # collect diagnostics, review locally, upload to gist, open
 | Key service logs | Per-profile `journalctl -b 0 -u <svc> -p warning..alert` — gdm/gnome-shell (`desktop-graphics.md`), bootc-fetch-apply-updates/rpm-ostreed/systemd-boot-update (`update-boot.md`), NetworkManager (`networking.md`), flatpak-system-helper/xdg-desktop-portal (`flatpak-application.md`) |
 | Groups (membership only) | `groups` (username redacted) |
 | GPU info | `nvidia-smi -q` (NVIDIA), DRM sysfs (AMD), `lspci` (all) |
-| Crash / panic detection | Previous boot end state, panic keywords, kernel errors, hardware fingerprint, crash artifact status |
+| Crash / panic detection | Boot end-state classifier, kernel error tail, hardware fingerprint, pstore/kdump status — **spec, not implemented**, see [Crash / panic detection — spec, not implemented](#crash--panic-detection--spec-not-implemented) |
+| Userspace coredump index | `coredumpctl list --since '7 days ago' \| tail -50` (inlined into `sleep-crash.md` by `profile_sleep_crash`, only when that profile is selected) |
 
 ## PII scrubbing
 
@@ -67,11 +68,22 @@ Applied to every `journalctl -b -1 -k` excerpt. **Order matters** — MAC must r
 
 **IPv6 regex rationale:** The 4-group minimum (`{3,7}`) avoids false-positives on `HH:MM:SS` timestamps (only 3 groups). The `::` pattern is a separate pass to catch loopback (`::1`), link-local (`fe80::1`), etc.
 
-**`Linux version` line is intentionally excluded** from the hardware fingerprint — it can contain build host strings (e.g. `builduser@buildhost`). Extract only `DMI: .* BIOS` lines.
+**`Linux version` line is intentionally excluded** from the hardware fingerprint — it can contain build host strings (e.g. `builduser@buildhost`). Extract only `DMI: .* BIOS` lines. (Spec-only: the fingerprint itself is not implemented — see [Crash / panic detection — spec, not implemented](#crash--panic-detection--spec-not-implemented).)
 
-## Crash / Panic Detection section
+## Crash / panic detection — what `profile_sleep_crash` actually collects
 
-Implemented in `projectbluefin/common/system_files/bluefin/usr/libexec/bonedigger-report` (`profile_sleep_crash`); the `60-bonedigger.just` recipe is a thin shim that execs it. All data sourced from `journalctl -b -1` (previous boot). All kernel excerpts pass through `scrub_kernel_log()` before landing in the report.
+The only crash/sleep collection that ships is `profile_sleep_crash` in `projectbluefin/common/system_files/bluefin/usr/libexec/bonedigger-report` (`bonedigger-report:194-203`). It writes `sleep-crash.md` and runs exactly two commands:
+
+| Sub-section | Command |
+|-------------|---------|
+| Previous boot crash and sleep signals | `journalctl -b -1 -k --no-pager \| grep -iE 'panic\|oops\|BUG:\|Call Trace\|suspend\|hibernate\|resume\|hung task\|lockup' \| tail -250` |
+| Coredump index (last seven days) | `coredumpctl list --no-pager --no-legend --since '7 days ago' \| tail -50` |
+
+Both pipelines end in `scrub_journal_log` (which chains `scrub_kernel_log` first — see `bonedigger-report:153-154`) and `|| true`, because `grep` exits 1 on no match under `set -euo pipefail`.
+
+## Crash / panic detection — spec, not implemented
+
+**Nothing in this section ships.** The boot end-state classifier, the PM suspend/exit logic, the `tail -200` shutdown scan, the DMI hardware fingerprint, and the pstore/kdump artifact checks have no counterpart in `bonedigger-report` — `pstore`, `kdump`, `DMI`, and `PM: suspend` do not appear anywhere in the 752-line script, and it reads `journalctl -b -1` exactly once (line 196). The text below is a design spec for future work, kept here alongside the [Console QR codes](#console-qr-codes-ujust-report--not-implemented) backlog.
 
 ### Boot end-state classifier (4 buckets — never assume)
 
@@ -87,7 +99,7 @@ Implemented in `projectbluefin/common/system_files/bluefin/usr/libexec/bonedigge
 
 **Three PM buckets, not two.** A boot that resumed from suspend and then crashed must not be reported as "no suspend markers found" — it had suspend markers, just no clean shutdown after.
 
-### Data collected (only when boot -1 is available)
+### Data the spec would collect (only when boot -1 is available)
 
 | Sub-section | Command | Notes |
 |-------------|---------|-------|
@@ -96,15 +108,15 @@ Implemented in `projectbluefin/common/system_files/bluefin/usr/libexec/bonedigge
 | Context window (last 30 kernel lines) | `journalctl -b -1 -k … \| tail -30` | Suppressed for clean shutdowns with no findings |
 | Hardware fingerprint | `grep -E 'DMI: .* BIOS' \| head -1` | DMI model + BIOS version only |
 
-### Crash artifact status (always collected, independent of boot -1)
+### Crash artifact status (spec: always collected, independent of boot -1)
 
-| Artifact | How detected |
+| Artifact | How it would be detected |
 |----------|-------------|
 | pstore | `mountpoint -q /sys/fs/pstore` + `find` file count; "empty" ≠ "no crash" — may have been cleared on boot |
 | kdump | `systemctl is-enabled/is-active kdump.service` (service status, not `/var/crash` directory) |
-| Userspace coredumps | `coredumpctl list --since "7 days ago" \| tail -10` (home paths scrubbed) |
+| Userspace coredumps | `coredumpctl list --since "7 days ago" \| tail -10` (home paths scrubbed). This is the one row with a shipped counterpart — `profile_sleep_crash` uses `tail -50`, not `tail -10` |
 
-### `set -euo pipefail` safety rules
+### `set -euo pipefail` safety rules (apply to this spec if it is ever built)
 
 - Every `journalctl … | grep … | tail` pipeline ends with `|| true` inside `$()` — grep exits 1 on no match
 - Shutdown classification uses `if journalctl … | tail -200 | grep -qiE …` — safe in `if` conditions
@@ -136,8 +148,10 @@ The full submit path lives in `submit_draft()` in `projectbluefin/common/system_
 |----------|---------|---------|
 | `IMAGE_INFO_FILE` | `/usr/share/ublue-os/image-info.json` | Image metadata path |
 | `BONEDIGGER_BRAND` | `🫐 Bluefin Bug Report` | Brand name shown in gum header |
+| `XDG_STATE_HOME` | `$HOME/.local/state` | Root for `ujust-report/drafts/` and `ujust-report/last/` (`bonedigger-report:7-8`) |
+| `UBLUE_IMAGE_REPO_BIN` | `/usr/libexec/ublue-image-repo` | Routing helper `route_issue_repo` execs to pick the issue repo (`bonedigger-report:138`) |
 
-`bonedigger-report` reads only these two variables (`bonedigger-report:5-6`). `BONEDIGGER_ISSUE_URL` is **spec, not implemented** — it belongs to the unimplemented [Console QR codes](#console-qr-codes-ujust-report--not-implemented) section.
+`bonedigger-report` reads these four overridable variables and no others (`HOME` is used only as the `XDG_STATE_HOME` fallback). `BONEDIGGER_ISSUE_URL` is **spec, not implemented** — it belongs to the unimplemented [Console QR codes](#console-qr-codes-ujust-report--not-implemented) section.
 
 ## Console QR codes (`ujust report`) — not implemented
 

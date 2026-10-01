@@ -24,17 +24,18 @@ must have a counterpart in the script or it does not appear in `issue.md`.
 | Failed systemd units | `systemctl list-units --state=failed …` | `collect_baseline` writes the Failed systemd units section |
 | Current boot errors | `journalctl -b 0 -p err..emerg --no-pager \| tail -40` | `collect_baseline` writes the Current boot errors section |
 | Previous-boot kernel crash / sleep signals | `journalctl -b -1 -k` filtered for panic / oops / suspend | `profile_sleep_crash` writes `sleep-crash.md` (only when that profile is selected, `:194-203`) |
+| Enabled GNOME extensions | `gnome-extensions list --enabled` | `profile_desktop_graphics` writes the \"Enabled extensions\" block in `desktop-graphics.md` (only when that profile is selected, `:184`) |
+| Installed Flatpaks | `flatpak list --columns=application,version` | `profile_flatpak_application` writes the \"Installed Flatpaks\" block in `flatpak-application.md` (only when that profile is selected, `:227`) |
+| Network device state | `nmcli --terse --fields DEVICE,TYPE,STATE device status` | `profile_networking` writes the \"Network device state\" block in `networking.md` (only when that profile is selected, `:221`) |
 | Key service logs | Per-profile `journalctl -b 0 -u <svc> -p warning..alert` — gdm/gnome-shell (`desktop-graphics.md`), bootc-fetch-apply-updates/rpm-ostreed/systemd-boot-update (`update-boot.md`), NetworkManager (`networking.md`), flatpak-system-helper/xdg-desktop-portal (`flatpak-application.md`) | `profile_*` smart-log profiles; only the selected profile's file is written |
 | Userspace coredump index | `coredumpctl list --since '7 days ago' \| tail -50` | `profile_sleep_crash` writes it into `sleep-crash.md` (only when that profile is selected) |
-| GPU info (display controllers only) | `lspci … \| grep -iE 'VGA\|Display\|3D controller\|2D controller'` | `collect_hardware_info` (`:184-188`); NOT `nvidia-smi`, NOT DRM sysfs — see below |
+| GPU info (display controllers only) | `lspci … \| grep -iE 'VGA\|Display\|3D controller\|2D controller'` | `profile_desktop_graphics` writes the \"Graphics devices\" block in `desktop-graphics.md` (`:184-188`); NOT `nvidia-smi`, NOT DRM sysfs — see below |
 
 Fields the previous version of this table claimed but the script does not
 emit, **removed**:
 
 - `Staged image` (`bootc status --json`) — only `BOOTED_DIGEST` is captured.
 - `GNOME version` (`gnome-shell --version`) — not run anywhere in the 752-line script.
-- `Active GNOME extensions` (`gnome-extensions list --enabled`) — not run.
-- `Installed Flatpaks` (`flatpak list …`) — not run.
 - `Load average` (`/proc/loadavg`) — not read.
 - `Memory usage` (`free -h --si`) — not run.
 - `Groups (membership only)` — not read.
@@ -192,7 +193,14 @@ round-trip (decoded output equals the input URL).
 - `qrencode` — spec-only, for the unimplemented [Console QR codes](#console-qr-codes-ujust-report--not-implemented); the shipped script never calls it
 - `bootc` — reads booted image status
 - `jq` — parses JSON from bootc and image-info
-- `gnome-shell`, `gnome-extensions`, `flatpak` — collects system info
+- `systemctl` — failed-unit listing (`collect_baseline`)
+- `journalctl` — boot-0 / boot-1 / per-service warnings (every profile)
+- `coredumpctl` — userspace coredump index (`profile_sleep_crash`, `:200`)
+- `nmcli` — network device state (`profile_networking`, `:221`)
+- `gnome-extensions` — enabled extensions (`profile_desktop_graphics`, `:184`)
+- `flatpak` — installed flatpaks (`profile_flatpak_application`, `:227`)
+- `lspci` — display controller grep (`profile_desktop_graphics`, `:184-188`)
+- `gnome-shell` — never invoked; the script reads gdm/gnome-shell logs through `journalctl`, not by running `gnome-shell` itself
 - `wl-copy` / `xclip` — **not used**. The shipped script never copies anything to the clipboard; the unauthenticated path is handled by `ensure_gh_ready` (offers `brew install gh` / `gh auth login`, keeps the draft for `--resume`). Kept here only as a backlog row alongside the [Console QR codes](#console-qr-codes-ujust-report--not-implemented) spec.
 
 ## Report output structure

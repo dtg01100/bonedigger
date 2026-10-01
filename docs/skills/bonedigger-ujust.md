@@ -10,25 +10,36 @@ ujust report         # collect diagnostics, review locally, upload to gist, open
 
 ## What `ujust report` collects
 
-| Field | Source |
-|-------|--------|
-| Image name, tag, flavor, ref | `/usr/share/ublue-os/image-info.json` |
-| Booted image + digest | `bootc status --json` |
-| Staged image | `bootc status --json` |
-| Kernel version, architecture | `uname -r`, `uname -m` |
-| GNOME version | `gnome-shell --version` |
-| Active GNOME extensions | `gnome-extensions list --enabled` |
-| Installed Flatpaks | `flatpak list --columns=application,version` |
-| Load average | `/proc/loadavg` |
-| Memory usage | `free -h --si` |
-| Failed systemd units | `systemctl list-units --state=failed` |
-| Current boot system errors | `journalctl -b 0 -p err..emerg … \| tail -40` (inlined into `issue.md` by `collect_baseline`) |
-| Previous boot kernel crash / sleep signals | `journalctl -b -1 -k` filtered for panic/oops/suspend keywords (inlined into `sleep-crash.md` by `profile_sleep_crash`, only when that profile is selected) |
-| Key service logs | Per-profile `journalctl -b 0 -u <svc> -p warning..alert` — gdm/gnome-shell (`desktop-graphics.md`), bootc-fetch-apply-updates/rpm-ostreed/systemd-boot-update (`update-boot.md`), NetworkManager (`networking.md`), flatpak-system-helper/xdg-desktop-portal (`flatpak-application.md`) |
-| Groups (membership only) | `groups` (username redacted) |
-| GPU info | `nvidia-smi -q` (NVIDIA), DRM sysfs (AMD), `lspci` (all) |
-| Crash / panic detection | Boot end-state classifier, kernel error tail, hardware fingerprint, pstore/kdump status — **spec, not implemented**, see [Crash / panic detection — spec, not implemented](#crash--panic-detection--spec-not-implemented) |
-| Userspace coredump index | `coredumpctl list --since '7 days ago' \| tail -50` (inlined into `sleep-crash.md` by `profile_sleep_crash`, only when that profile is selected) |
+The script's only system-level baseline is `collect_baseline` in
+`projectbluefin/common/system_files/bluefin/usr/libexec/bonedigger-report:311-346`
+plus the per-profile journalctl scrapes the user opts into. Everything below
+must have a counterpart in the script or it does not appear in `issue.md`.
+
+| Field | Source | Line(s) in `bonedigger-report` |
+|-------|--------|--------------------------------|
+| Image name, tag, version, flavor | `/usr/share/ublue-os/image-info.json` (`IMAGE_REF`, `IMAGE_TAG`, `IMAGE_VERSION`, `IMAGE_FLAVOR`) | `collect_baseline` writes Image / Tag / Version / Flavor |
+| Booted digest | `bootc status --json` (`BOOTED_DIGEST`) | `collect_baseline` writes Booted digest |
+| Kernel version | `uname -r` | `collect_baseline` writes Kernel |
+| Architecture | `uname -m` | `collect_baseline` writes Architecture |
+| Failed systemd units | `systemctl list-units --state=failed …` | `collect_baseline` writes the Failed systemd units section |
+| Current boot errors | `journalctl -b 0 -p err..emerg --no-pager \| tail -40` | `collect_baseline` writes the Current boot errors section |
+| Previous-boot kernel crash / sleep signals | `journalctl -b -1 -k` filtered for panic / oops / suspend | `profile_sleep_crash` writes `sleep-crash.md` (only when that profile is selected, `:194-203`) |
+| Key service logs | Per-profile `journalctl -b 0 -u <svc> -p warning..alert` — gdm/gnome-shell (`desktop-graphics.md`), bootc-fetch-apply-updates/rpm-ostreed/systemd-boot-update (`update-boot.md`), NetworkManager (`networking.md`), flatpak-system-helper/xdg-desktop-portal (`flatpak-application.md`) | `profile_*` smart-log profiles; only the selected profile's file is written |
+| Userspace coredump index | `coredumpctl list --since '7 days ago' \| tail -50` | `profile_sleep_crash` writes it into `sleep-crash.md` (only when that profile is selected) |
+| GPU info (display controllers only) | `lspci … \| grep -iE 'VGA\|Display\|3D controller\|2D controller'` | `collect_hardware_info` (`:184-188`); NOT `nvidia-smi`, NOT DRM sysfs — see below |
+
+Fields the previous version of this table claimed but the script does not
+emit, **removed**:
+
+- `Staged image` (`bootc status --json`) — only `BOOTED_DIGEST` is captured.
+- `GNOME version` (`gnome-shell --version`) — not run anywhere in the 752-line script.
+- `Active GNOME extensions` (`gnome-extensions list --enabled`) — not run.
+- `Installed Flatpaks` (`flatpak list …`) — not run.
+- `Load average` (`/proc/loadavg`) — not read.
+- `Memory usage` (`free -h --si`) — not run.
+- `Groups (membership only)` — not read.
+- `nvidia-smi -q` and DRM sysfs GPU info — only `lspci` is used; NVIDIA / AMD specifics are not in the script.
+- `Crash / panic detection` — the boot end-state classifier, kernel error tail, hardware fingerprint, pstore/kdump status are **spec, not implemented**, and are kept as design backlog in [Crash / panic detection — spec, not implemented](#crash--panic-detection--spec-not-implemented). The script's only kernel-side collection is the `profile_sleep_crash` smart-log, which the table above already covers.
 
 ## PII scrubbing
 

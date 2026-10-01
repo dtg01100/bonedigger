@@ -17,7 +17,8 @@ must have a counterpart in the script or it does not appear in `issue.md`.
 
 | Field | Source | Line(s) in `bonedigger-report` |
 |-------|--------|--------------------------------|
-| Image name, tag, version, flavor | `/usr/share/ublue-os/image-info.json` (`IMAGE_REF`, `IMAGE_TAG`, `IMAGE_VERSION`, `IMAGE_FLAVOR`) | `collect_baseline` writes Image / Tag / Version / Flavor |
+| Image name, tag, flavor | `/usr/share/ublue-os/image-info.json` (`image-name`, `image-ref`, `image-tag`, `image-flavor`); booted bootc ref from `/run/ublue-os/booted-image` overrides `IMAGE_REF` / `IMAGE_TAG` / `IMAGE_NAME` when present (`:76-125`) | `collect_baseline` writes Image / Tag / Version / Flavor |
+| Image version | `/etc/os-release` (`IMAGE_VERSION=`, `:131-132`); falls back to `unknown` when the field is missing | `collect_baseline` writes Version |
 | Booted digest | `bootc status --json` (`BOOTED_DIGEST`) | `collect_baseline` writes Booted digest |
 | Kernel version | `uname -r` | `collect_baseline` writes Kernel |
 | Architecture | `uname -m` | `collect_baseline` writes Architecture |
@@ -27,9 +28,9 @@ must have a counterpart in the script or it does not appear in `issue.md`.
 | Enabled GNOME extensions | `gnome-extensions list --enabled` | `profile_desktop_graphics` writes the \"Enabled extensions\" block in `desktop-graphics.md` (only when that profile is selected, `:184`) |
 | Installed Flatpaks | `flatpak list --columns=application,version` | `profile_flatpak_application` writes the \"Installed Flatpaks\" block in `flatpak-application.md` (only when that profile is selected, `:227`) |
 | Network device state | `nmcli --terse --fields DEVICE,TYPE,STATE device status` | `profile_networking` writes the \"Network device state\" block in `networking.md` (only when that profile is selected, `:221`) |
-| Key service logs | Per-profile `journalctl -b 0 -u <svc> -p warning..alert` — gdm/gnome-shell (`desktop-graphics.md`), bootc-fetch-apply-updates/rpm-ostreed/systemd-boot-update (`update-boot.md`), NetworkManager (`networking.md`), flatpak-system-helper/xdg-desktop-portal (`flatpak-application.md`) | `profile_*` smart-log profiles; only the selected profile's file is written |
+| Key service logs | Per-profile `journalctl -b 0 -u <svc> -p warning..alert` — gdm/gnome-shell (`desktop-graphics.md`), bootc-fetch-apply-updates/rpm-ostreed/systemd-boot-update (`update-boot.md`), NetworkManager (`networking.md`), flatpak-system-helper/xdg-desktop-portal (`flatpak-application.md`); `update-boot.md` also embeds `bootc status` from `$BOOTC_STATUS` (`:206-207`) | `profile_*` smart-log profiles; only the selected profile's file is written |
 | Userspace coredump index | `coredumpctl list --since '7 days ago' \| tail -50` | `profile_sleep_crash` writes it into `sleep-crash.md` (only when that profile is selected) |
-| GPU info (display controllers only) | `lspci … \| grep -iE 'VGA\|Display\|3D controller\|2D controller'` | `profile_desktop_graphics` writes the \"Graphics devices\" block in `desktop-graphics.md` (`:184-188`); NOT `nvidia-smi`, NOT DRM sysfs — see below |
+| GPU info (display controllers only) | `lspci … \| grep -iE 'VGA\|Display\|3D controller\|2D controller'` | `profile_desktop_graphics` writes the \"Graphics devices\" block in `desktop-graphics.md` (`:186-187`); NOT `nvidia-smi`, NOT DRM sysfs — see below |
 
 Fields the previous version of this table claimed but the script does not
 emit, **removed**:
@@ -152,7 +153,7 @@ The full submit path lives in `submit_draft()` in `projectbluefin/common/system_
 5. **`publish_smart_logs`** (only when `PROFILE_FILES` is non-empty). `gh gist create --public --desc "ujust report smart logs $(date -I)" "${PROFILE_FILES[@]}"`. The returned gist URL is cached in `$DRAFT_DIR/gist-url.txt` and appended to `$DRAFT_DIR/issue.md` as a `### Selected smart logs` block — so a re-run does not double-post.
 6. **`create_issue`**. `gh issue create --repo <repo> --title <title> --body-file <issue.md>` plus `--label <queue-label>` when one was chosen. On failure the draft is kept.
 7. **`persist_local_copy`**. Copies `issue.md` to `${XDG_STATE_HOME:-$HOME/.local/state}/ujust-report/last/summary.md` and any non-`issue.md` profile files (e.g. `desktop-graphics.md`) alongside. `journal.txt` is only copied if the draft already contains one — `bonedigger-report` does not generate one.
-8. **Cleanup and offer**. On full success: `rm -rf "$DRAFT_DIR"`, print `Local copy kept at: …`, then `offer_browser` (`gum confirm` → `xdg-open` of the issue URL). On any earlier failure the draft survives for `ujust report --resume <draft>`.
+8. **Submission result, persist local copy, cleanup, and offer**. On full success: print `Report submitted successfully.\n<issue_url>` (`:555`), then `persist_local_copy` and either print `Local copy kept at: …` or `Report submitted, but the local copy could not be saved.` on persistence failure (`:549-558`), then `rm -rf "$DRAFT_DIR"`, then `offer_browser` (`gum confirm` → `xdg-open` of the issue URL). On any earlier failure the draft survives for `ujust report --resume <draft>`.
 
 ## Environment variable overrides
 
@@ -199,7 +200,7 @@ round-trip (decoded output equals the input URL).
 - `nmcli` — network device state (`profile_networking`, `:221`)
 - `gnome-extensions` — enabled extensions (`profile_desktop_graphics`, `:184`)
 - `flatpak` — installed flatpaks (`profile_flatpak_application`, `:227`)
-- `lspci` — display controller grep (`profile_desktop_graphics`, `:184-188`)
+- `lspci` — display controller grep (`profile_desktop_graphics`, `:186-187`)
 - `gnome-shell` — never invoked; the script reads gdm/gnome-shell logs through `journalctl`, not by running `gnome-shell` itself
 - `wl-copy` / `xclip` — **not used**. The shipped script never copies anything to the clipboard; the unauthenticated path is handled by `ensure_gh_ready` (offers `brew install gh` / `gh auth login`, keeps the draft for `--resume`). Kept here only as a backlog row alongside the [Console QR codes](#console-qr-codes-ujust-report--not-implemented) spec.
 
